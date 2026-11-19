@@ -6,7 +6,6 @@ on:
     paths:
       - 'Dockerfile'
       - 'index.js'
-      - 'index.html'
       - 'package.json'
       - '.image.name'
       - '.github/workflows/build-docker-image.yml'

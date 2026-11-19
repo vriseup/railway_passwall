@@ -8,14 +8,14 @@ TEMPLATE="index.template.js"
 GENERATED="index.generated.js"
 OUTPUT="index.js"
 IMAGE_NAME_FILE=".image.name"
+SUB_FILE="sub.txt"
 
 log() { printf '[make] %s\n' "$*"; }
 die() { printf '[make] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$TEMPLATE" ]] || die "找不到 $TEMPLATE"
-[[ -f "$ENV_FILE" ]] || die "找不到 $ENV_FILE，请先配置 Cloudflare Tunnel 变量"
+[[ -f "$ENV_FILE" ]] || die "找不到 $ENV_FILE，请先配置变量"
 
-# 从 .env 读取变量（忽略注释、空行、export 前缀），不把密钥回显到终端
 get_env() {
   local key="$1"
   awk -F= -v k="$key" '
@@ -32,36 +32,44 @@ get_env() {
 
 ARGO_DOMAIN="$(get_env ARGO_DOMAIN || true)"
 ARGO_AUTH="$(get_env ARGO_AUTH || true)"
+UUID="$(get_env UUID || true)"
+CFIP="$(get_env CFIP || true)"
 
 [[ -n "${ARGO_DOMAIN:-}" ]] || die ".env 中 ARGO_DOMAIN 不能为空"
 [[ -n "${ARGO_AUTH:-}" ]] || die ".env 中 ARGO_AUTH 不能为空"
+[[ -n "${UUID:-}" ]] || die ".env 中 UUID 不能为空"
+[[ -n "${CFIP:-}" ]] || die ".env 中 CFIP 不能为空"
 
-# 域名做镜像名清洗：小写、只保留 [a-z0-9._-]，GHCR 需要全小写
 IMAGE_NAME="$(printf '%s' "$ARGO_DOMAIN" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._-')"
 [[ -n "$IMAGE_NAME" ]] || die "ARGO_DOMAIN 无法转换为合法镜像名"
 
-# Node 生成注入后的临时文件和混淆后的 index.js
-node scripts/inject-env.js "$TEMPLATE" "$GENERATED" "$ARGO_DOMAIN" "$ARGO_AUTH"
+VALUES_JSON="$(node -e '
+const [d,a,u,c]=process.argv.slice(1);
+process.stdout.write(JSON.stringify({ARGO_DOMAIN:d,ARGO_AUTH:a,UUID:u,CFIP:c}));
+' "$ARGO_DOMAIN" "$ARGO_AUTH" "$UUID" "$CFIP")"
 
+node scripts/inject-env.js "$TEMPLATE" "$GENERATED" "$VALUES_JSON"
 node scripts/obfuscate.js "$GENERATED" "$OUTPUT"
 rm -f "$GENERATED"
 printf '%s\n' "$IMAGE_NAME" > "$IMAGE_NAME_FILE"
 
-# 语法检查，确保混淆产物可运行
+node scripts/generate-sub.js "$SUB_FILE" "$VALUES_JSON"
+
 node --check "$OUTPUT" || die "生成的 index.js 语法检查失败"
 
-# 确认敏感文件不会入库
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if git ls-files --error-unmatch .env >/dev/null 2>&1; then
     die ".env 已被 git 跟踪，请执行: git rm --cached .env"
   fi
+  if git ls-files --error-unmatch "$SUB_FILE" >/dev/null 2>&1; then
+    die "$SUB_FILE 已被 git 跟踪，请执行: git rm --cached $SUB_FILE"
+  fi
 fi
 
-# 自动提交并推送；只有有变化时才提交
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git add -A -- .gitignore README.md make.sh scripts index.template.js index.sample.js index.js index.html Dockerfile package.json package-lock.json .github/workflows "$IMAGE_NAME_FILE" 2>/dev/null || true
+  git add -A -- .gitignore README.md make.sh scripts index.template.js index.sample.js index.js Dockerfile package.json package-lock.json .github/workflows "$IMAGE_NAME_FILE" 2>/dev/null || true
   if ! git diff --cached --quiet; then
-    git commit -m "build: generate index.js for ${IMAGE_NAME}"
+    git commit -m "build: generate index.js for ${IMAGE_NAME} (no http server)"
     git push origin HEAD || die "推送失败，请检查 GitHub 权限/网络"
   else
     log "没有需要提交的变更"
@@ -69,4 +77,5 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 log "镜像名: ${IMAGE_NAME}"
+log "订阅文件已生成: ${SUB_FILE}（不会提交 GitHub）"
 log "完成。GitHub Actions 将构建并推送 ghcr.io/<owner>/${IMAGE_NAME}:latest"

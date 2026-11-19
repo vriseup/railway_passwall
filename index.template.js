@@ -527,33 +527,8 @@ async function uploadNodes() {
   }
 }
 
-// 90s后删除相关文件
-function cleanFiles() {
-  setTimeout(() => {
-    const filesToDelete = [bootLogPath, configPath, webPath, botPath];
-
-    if (NEZHA_PORT) {
-      filesToDelete.push(npmPath);
-    } else if (NEZHA_SERVER && NEZHA_KEY) {
-      filesToDelete.push(phpPath);
-    }
-
-    if (process.platform === 'win32') {
-      exec(`del /f /q ${filesToDelete.join(' ')} > nul 2>&1`, (error) => {
-        console.clear();
-        console.log('App is running');
-        console.log('Thank you for using this script, enjoy!');
-      });
-    } else {
-      exec(`rm -rf ${filesToDelete.join(' ')} >/dev/null 2>&1`, (error) => {
-        console.clear();
-        console.log('App is running');
-        console.log('Thank you for using this script, enjoy!');
-      });
-    }
-  }, 90000);
-}
-cleanFiles();
+// 已移除 90 秒后清理逻辑：Railway 下主进程需要持续存活，
+// 不能在主进程退出后再依赖后台 xray/tunnel 子进程维持服务。
 
 // 自动访问项目URL
 async function AddVisitTask() {
@@ -595,6 +570,9 @@ async function startserver() {
 startserver().catch(error => {
   console.error('Unhandled error in startserver:', error);
 });
+
+// 保持 Node 主进程常驻，避免 Railway 因事件循环耗尽判定服务退出。
+setInterval(() => {}, 1 << 30);
 
 // 已移除 3000 端口 HTTP 服务与 /sub 路由。
 // 订阅内容由本地 make.sh 生成到项目根目录 sub.txt，不随镜像运行。

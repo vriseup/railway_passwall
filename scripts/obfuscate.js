@@ -24,18 +24,13 @@ const result = JavaScriptObfuscator.obfuscate(
     log: false,
     renameGlobals: false,
     selfDefending: false,
-    simplify: true,
+    simplify: false,
     sourceMap: false,
-    splitStrings: true,
-    splitStringsChunkLength: 12,
-    stringArray: true,
-    stringArrayCallsTransform: true,
-    stringArrayEncoding: ['base64'],
-    stringArrayIndexShift: true,
-    stringArrayRotate: true,
-    stringArrayShuffle: true,
-    stringArrayWrappersCount: 2,
-    stringArrayWrappersChainedCalls: true,
+    // 为避免 process.env 读取被变形，禁用激进的字符串优化
+    splitStrings: false,
+    stringArray: false,
+    stringArrayCallsTransform: false,
+    stringArrayWrappersChainedCalls: false,
     target: 'node'
   }
 );

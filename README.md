@@ -23,7 +23,8 @@ Cloudflare Tunnel + WebSocket 回源镜像构建工程。
   4. 写入镜像名文件 `.image.name`
   5. 生成项目根目录 `sub.txt`
   6. 自动 `git commit && git push`
-- GitHub Actions 监听 `main` 分支，从 `.image.name` 读取域名作为镜像名，构建并推送到 GHCR。
+- GitHub Actions 已改为仅手动触发，代码 push 不会再自动构建镜像。
+- 如需构建镜像，请到 GitHub Actions 页面手动运行 `Build and Push Docker Image`；它会从 `.image.name` 读取域名作为镜像名并推送到 GHCR。
 
 ## 新节点部署流程
 
@@ -43,7 +44,7 @@ CFIP=your-preferred-cf-cname
 ./make.sh
 ```
 
-脚本会自动提交并推送。GitHub Actions 构建完成后，镜像地址为：
+脚本只会提交并推送代码，不会自动构建镜像。手动运行 GitHub Actions 构建完成后，镜像地址为：
 
 ```text
 ghcr.io/vriseup/your-domain.example.com:latest

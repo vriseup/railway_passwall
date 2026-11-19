@@ -7,7 +7,6 @@ ENV_FILE=".env"
 TEMPLATE="index.template.js"
 GENERATED="index.generated.js"
 OUTPUT="index.js"
-IMAGE_NAME_FILE=".image.name"
 SUB_FILE="sub.txt"
 
 log() { printf '[make] %s\n' "$*"; }
@@ -51,7 +50,6 @@ process.stdout.write(JSON.stringify({ARGO_DOMAIN:d,ARGO_AUTH:a,UUID:u,CFIP:c}));
 node scripts/inject-env.js "$TEMPLATE" "$GENERATED" "$VALUES_JSON"
 node scripts/obfuscate.js "$GENERATED" "$OUTPUT"
 rm -f "$GENERATED"
-printf '%s\n' "$IMAGE_NAME" > "$IMAGE_NAME_FILE"
 
 node scripts/generate-sub.js "$SUB_FILE" "$VALUES_JSON"
 
@@ -67,7 +65,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git add -A -- .gitignore README.md make.sh scripts index.template.js index.sample.js index.js Dockerfile package.json package-lock.json .github/workflows "$IMAGE_NAME_FILE" 2>/dev/null || true
+  git add -A -- .gitignore README.md make.sh scripts index.template.js index.js Dockerfile package.json package-lock.json .github/workflows 2>/dev/null || true
   if ! git diff --cached --quiet; then
     git commit -m "build: generate index.js for ${IMAGE_NAME} (no http server)"
     git push origin HEAD || die "推送失败，请检查 GitHub 权限/网络"
@@ -78,4 +76,4 @@ fi
 
 log "镜像名: ${IMAGE_NAME}"
 log "订阅文件已生成: ${SUB_FILE}（不会提交 GitHub）"
-log "完成。GitHub Actions 将构建并推送 ghcr.io/<owner>/${IMAGE_NAME}:latest"
+log "完成。代码已提交；如需构建镜像，请手动运行 GitHub Actions: Build and Push Docker Image"

@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 'use strict';
 
-// 使用 javascript-obfuscator 对注入后的入口做混淆，生成运行时 index.js。
+// 将 index.template.js 直接混淆为 index.js。
+// 不注入任何真实变量值，运行时继续从 process.env 读取配置。
 // 用法: node scripts/obfuscate.js <input> <output>
 
+const fs = require('fs');
 const path = require('path');
 const JavaScriptObfuscator = require('javascript-obfuscator');
 
-const inputPath = path.resolve(process.argv[2] || 'index.generated.js');
+const inputPath = path.resolve(process.argv[2] || 'index.template.js');
 const outputPath = path.resolve(process.argv[3] || 'index.js');
 
 const result = JavaScriptObfuscator.obfuscate(
-  require('fs').readFileSync(inputPath, 'utf8'),
+  fs.readFileSync(inputPath, 'utf8'),
   {
     compact: true,
     controlFlowFlattening: false,
@@ -38,5 +40,5 @@ const result = JavaScriptObfuscator.obfuscate(
   }
 );
 
-require('fs').writeFileSync(outputPath, result.getObfuscatedCode(), 'utf8');
+fs.writeFileSync(outputPath, result.getObfuscatedCode(), 'utf8');
 console.log(`obfuscated ${path.basename(inputPath)} -> ${path.basename(outputPath)}`);

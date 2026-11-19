@@ -1,7 +1,7 @@
 {
   "name": "railway-passwall",
   "version": "1.0.0",
-  "description": "Cloudflare Tunnel websocket relay image builder",
+  "description": "Cloudflare Tunnel websocket relay for Railway serverless platforms",
   "main": "index.js",
   "author": "",
   "repository": "",
@@ -10,8 +10,7 @@
   "scripts": {
     "dev": "node index.js",
     "start": "node index.js",
-    "inject": "node scripts/inject-env.js",
-    "obfuscate": "javascript-obfuscator index.generated.js --output index.js --compact true --self-defending false --control-flow-flattening false --dead-code-injection false --string-array true --string-array-encoding base64 --string-array-wrappers-count 2 --rename-globals false --identifier-names-generator hexadecimal --operators-transform ['add','split']"
+    "build": "node scripts/obfuscate.js index.template.js index.js"
   },
   "dependencies": {
     "axios": "latest"

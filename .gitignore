@@ -1,11 +1,6 @@
-# 本地环境变量，包含 Cloudflare Tunnel 密钥，禁止提交
+# 本地环境变量与订阅文件，禁止提交
 .env
-
-# 本地生成的订阅内容，包含节点链接，禁止提交
 sub.txt
-
-# 生成产物（如果希望 Actions 从源码构建，可将 index.js 取消注释并提交）
-# index.js
 
 # 依赖与临时目录
 node_modules/

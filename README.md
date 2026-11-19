@@ -45,10 +45,21 @@ Variables → Service Variables → Raw Editor
 
 #### 通常只需要配置这两项
 
+标准变量名：
+
 ```env
 ARGO_DOMAIN=railway001.586658.xyz
 ARGO_AUTH=eyJhIjoi...你的Cloudflare Tunnel Token...
 ```
+
+也可以使用简写变量名：
+
+```env
+DOMAIN=railway001.586658.xyz
+AUTH=eyJhIjoi...你的Cloudflare Tunnel Token...
+```
+
+规则：`ARGO_DOMAIN` / `ARGO_AUTH` 优先；如果未提供，则读取 `DOMAIN` / `AUTH`。
 
 只要 Cloudflare Tunnel 的 route 已经配置好，`UUID` 和 `CFIP` 可以使用项目内置默认值，不需要每次填写。
 
@@ -63,8 +74,10 @@ CFIP=cdns.doon.eu.org
 
 | 变量 | 是否必填 | 示例 | 说明 |
 |---|---:|---|---|
-| `ARGO_DOMAIN` | 是 | `railway001.586658.xyz` | Cloudflare Tunnel 绑定的固定域名 |
-| `ARGO_AUTH` | 是 | Token 或 JSON | Cloudflare Tunnel 密钥。推荐使用 Token |
+| `ARGO_DOMAIN` | 二选一 | `railway001.586658.xyz` | Cloudflare Tunnel 绑定的固定域名；标准变量名 |
+| `ARGO_AUTH` | 二选一 | Token 或 JSON | Cloudflare Tunnel 密钥；标准变量名 |
+| `DOMAIN` | 二选一 | `railway001.586658.xyz` | `ARGO_DOMAIN` 的简写 |
+| `AUTH` | 二选一 | Token 或 JSON | `ARGO_AUTH` 的简写 |
 | `UUID` | 否 | `aae820aa-a042-4938-9fc5-fe1d2b492c1c` | 节点 UUID；不填时使用项目内置默认值 |
 | `CFIP` | 否 | `cdns.doon.eu.org` | Cloudflare 亚洲优选 IP / CNAME 域名；不填时使用项目内置默认值 |
 

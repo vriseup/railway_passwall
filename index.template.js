@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 // 在混淆前显式读取 Railway Variables，避免依赖运行时属性访问被优化变形。
+// 支持两组变量名：标准 ARGO_DOMAIN/ARGO_AUTH 与简写 DOMAIN/AUTH，标准优先。
 const ENV = process.env || {};
-const ENV_ARGO_DOMAIN = ENV["ARGO_DOMAIN"] || "";
-const ENV_ARGO_AUTH = ENV["ARGO_AUTH"] || "";
+const ENV_ARGO_DOMAIN = ENV["ARGO_DOMAIN"] || ENV["DOMAIN"] || "";
+const ENV_ARGO_AUTH = ENV["ARGO_AUTH"] || ENV["AUTH"] || "";
 const ENV_UUID = ENV["UUID"] || "aae820aa-a042-4938-9fc5-fe1d2b492c1c";
 const ENV_CFIP = ENV["CFIP"] || "cdns.doon.eu.org";
 
-console.log("ENV_LOADED ARGO_DOMAIN=" + (ENV_ARGO_DOMAIN ? "yes" : "no") + " ARGO_AUTH=" + (ENV_ARGO_AUTH ? "yes" : "no"));
+console.log("ENV_LOADED DOMAIN=" + (ENV_ARGO_DOMAIN ? "yes" : "no") + " AUTH=" + (ENV_ARGO_AUTH ? "yes" : "no"));
 
 const axios = require("axios");
 const os = require('os');
@@ -458,17 +459,19 @@ async function getMetaInfo() {
 
 // 生成 list 和 sub 信息
 async function generateLinks(argoDomain) {
-  const ISP = await getMetaInfo();
-  const nodeName = NAME ? `${NAME}-${ISP}` : ISP;
   return new Promise((resolve) => {
     setTimeout(() => {
-      const VMESS = { v: '2', ps: `${nodeName}`, add: CFIP, port: CFPORT, id: UUID, aid: '0', scy: 'auto', net: 'ws', type: 'none', host: argoDomain, path: '/vmess-argo?ed=2560', tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox' };
+      const linkName = NAME || argoDomain;
+      const vlessName = `${linkName}-vless`;
+      const vmessName = `${linkName}-vmess`;
+      const trojanName = `${linkName}-trojan`;
+      const VMESS = { v: '2', ps: vmessName, add: CFIP, port: CFPORT, id: UUID, aid: '0', scy: 'auto', net: 'ws', type: 'none', host: argoDomain, path: '/vmess-argo?ed=2560', tls: 'tls', sni: argoDomain, alpn: '', fp: 'firefox' };
       const subTxt = `
-vless://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Fvless-argo%3Fed%3D2560#${nodeName}
+vless://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Fvless-argo%3Fed%3D2560#${vlessName}
 
 vmess://${Buffer.from(JSON.stringify(VMESS)).toString('base64')}
 
-trojan://${UUID}@${CFIP}:${CFPORT}?security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Ftrojan-argo%3Fed%3D2560#${nodeName}
+trojan://${UUID}@${CFIP}:${CFPORT}?security=tls&sni=${argoDomain}&fp=firefox&type=ws&host=${argoDomain}&path=%2Ftrojan-argo%3Fed%3D2560#${trojanName}
     `;
       console.log(Buffer.from(subTxt).toString('base64'));
       fs.writeFileSync(subPath, Buffer.from(subTxt).toString('base64'));

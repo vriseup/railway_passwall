@@ -59,7 +59,7 @@ fi
 
 # 自动提交并推送；只有有变化时才提交
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git add .gitignore make.sh scripts/obfuscate.js index.js index.html Dockerfile package.json .github/workflows "$IMAGE_NAME_FILE" 2>/dev/null || true
+  git add -A -- .gitignore README.md make.sh scripts index.template.js index.sample.js index.js index.html Dockerfile package.json package-lock.json .github/workflows "$IMAGE_NAME_FILE" 2>/dev/null || true
   if ! git diff --cached --quiet; then
     git commit -m "build: generate index.js for ${IMAGE_NAME}"
     git push origin HEAD || die "推送失败，请检查 GitHub 权限/网络"

@@ -5,10 +5,11 @@ on:
     branches: [ main ]
     paths:
       - 'Dockerfile'
-      - 'index-us.js'
+      - 'index.js'
+      - 'index.html'
       - 'package.json'
-  pull_request:
-    branches: [ main ]
+      - '.image.name'
+      - '.github/workflows/build-docker-image.yml'
   workflow_dispatch:
 
 jobs:
@@ -21,6 +22,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Resolve image name from .image.name
+        id: name
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="$(tr -d '\r\n' < .image.name)"
+          name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9._-')"
+          if [ -z "$name" ]; then echo ".image.name is empty" >&2; exit 1; fi
+          echo "value=$name" >> "$GITHUB_OUTPUT"
+          echo "image name: $name"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -39,10 +51,11 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ github.repository_owner }}/railway-us:latest
+            ghcr.io/${{ github.repository_owner }}/${{ steps.name.outputs.value }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ steps.name.outputs.value }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=HTTP Server
+            org.opencontainers.image.description=Cloudflare Tunnel websocket relay for ${{ steps.name.outputs.value }}
             org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max

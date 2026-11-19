@@ -158,60 +158,37 @@ Railway 连接 GitHub 后，代码变动会触发所有关联 Service 重新部�
   - `/vmess-argo?ed=2560`
   - `/trojan-argo?ed=2560`
 
-本项目已移除 `3000` 端口 HTTP 服务、`/sub` HTTP 路由和本地 `sub.txt` 生成脚本。订阅链接请自行根据域名、UUID、CFIP 拼接。
+本项目已移除 `3000` 端口 HTTP 服务、`/sub` HTTP 路由和本地 `sub.txt` 生成脚本。
 
-## 订阅链接拼接模板
+## 订阅内容
 
-替换下面模板中的：
+服务启动并成功连接 Cloudflare Tunnel 后，Railway 的 Deploy Logs 会自动打印一整段 base64 内容。
 
-- `YOUR_UUID`
-- `YOUR_CFIP`
-- `YOUR_DOMAIN`
-- `YOUR_NAME`
-
-即可手动生成订阅内容。
-
-### vless
+该 base64 解码后包含三条完整协议链接：
 
 ```text
-vless://YOUR_UUID@YOUR_CFIP:443?encryption=none&security=tls&sni=YOUR_DOMAIN&fp=chrome&alpn=http%2F1.1&type=ws&host=YOUR_DOMAIN&path=%2Fvless-argo%3Fed%3D2560#YOUR_NAME-vless
+vless://...
+vmess://...
+trojan://...
 ```
 
-### vmess
+节点别名格式默认如下：
 
 ```text
-vmess://BASE64_JSON
+域名-vless
+域名-vmess
+域名-trojan
 ```
 
-其中 `BASE64_JSON` 是下面 JSON 的 base64：
-
-```json
-{
-  "v": "2",
-  "ps": "YOUR_NAME-vmess",
-  "add": "YOUR_CFIP",
-  "port": "443",
-  "id": "YOUR_UUID",
-  "aid": "0",
-  "scy": "none",
-  "net": "ws",
-  "type": "none",
-  "host": "YOUR_DOMAIN",
-  "path": "/vmess-argo?ed=2560",
-  "tls": "tls",
-  "sni": "YOUR_DOMAIN",
-  "alpn": "http/1.1",
-  "fp": "chrome",
-  "insecure": "0",
-  "pcs": ""
-}
-```
-
-### trojan
+如果设置了 `NAME` 变量，则别名格式变为：
 
 ```text
-trojan://YOUR_UUID@YOUR_CFIP:443?security=tls&sni=YOUR_DOMAIN&fp=chrome&alpn=http%2F1.1&type=ws&host=YOUR_DOMAIN&path=%2Ftrojan-argo%3Fed%3D2560#YOUR_NAME-trojan
+NAME-vless
+NAME-vmess
+NAME-trojan
 ```
+
+你只需要复制 Deploy Logs 中的 base64 内容即可，不需要手动拼接三协议链接。
 
 ## 安全说明
 

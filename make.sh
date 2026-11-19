@@ -66,6 +66,8 @@ fi
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git add -A -- .gitignore README.md make.sh scripts index.template.js index.js Dockerfile package.json package-lock.json .github/workflows 2>/dev/null || true
+  # 确保模板与生成入口始终被纳入提交
+  git add -f index.template.js index.js 2>/dev/null || true
   if ! git diff --cached --quiet; then
     git commit -m "build: generate index.js for ${IMAGE_NAME} (no http server)"
     git push origin HEAD || die "推送失败，请检查 GitHub 权限/网络"

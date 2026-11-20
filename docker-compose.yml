@@ -4,9 +4,11 @@ services:
     restart: unless-stopped
     image: railway-passwall:local
     build:
-      context: https://github.com/vriseup/railway_passwall.git#main
+      context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
-      ARGO_DOMAIN: ${DOMAIN:-}
-      ARGO_AUTH: ${AUTH:-}
-      TZ: ${TZ:-Asia/Shanghai}
+      ARGO_DOMAIN: ${DOMAIN}
+      ARGO_AUTH: ${AUTH}
+      TZ: ${TZ}

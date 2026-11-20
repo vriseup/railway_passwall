@@ -5,6 +5,7 @@ services:
     container_name: railway-passwall
     restart: unless-stopped
     image: railway-passwall:local
+    network_mode: host
     build:
       context: .
       dockerfile: Dockerfile

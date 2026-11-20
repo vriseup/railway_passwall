@@ -33,7 +33,7 @@ const NAME = process.env.NAME || '';                        // 节点名称
 
 // 多出口 IP 模式：默认启用。
 // IPS 为空时，要求 host 网络，自动枚举宿主可见的有效 IPv4。
-// IPS 非空时，使用显式 IP 列表，可用于 bridge 网络 + 端口映射；Cloudflare Route 仍应指向容器内 localhost 端口。
+// IPS 非空时，固定选择本地源地址；绑定宿主 IP 仍须 host 网络，不能用 ports 映射代替。
 const MULTI_IP_MODE = String(ENV.MULTI_IP_MODE || 'true').toLowerCase() !== 'false';
 const MULTI_IP_INCLUDE_PRIVATE = String(ENV.MULTI_IP_INCLUDE_PRIVATE || '').toLowerCase() === 'true';
 const MULTI_IP_INCLUDE_LOOPBACK = String(ENV.MULTI_IP_INCLUDE_LOOPBACK || '').toLowerCase() === 'true';
@@ -284,6 +284,13 @@ async function generateConfig() {
     }
 
     const plan = getRoutePlan();
+    const localIPv4s = new Set(Object.values(os.networkInterfaces()).flat()
+      .filter(info => info.family === 'IPv4').map(info => info.address));
+    for (const item of plan) {
+      if (!localIPv4s.has(item.ip)) {
+        throw new Error(`出口地址 ${item.ip} 不在当前网络命名空间中。绑定宿主 IP 必须使用 network_mode: host；填写 IPS 或添加 ports 映射不能代替 host 网络。`);
+      }
+    }
     inbounds = [];
     outbounds = [];
     const rules = [];
@@ -296,7 +303,7 @@ async function generateConfig() {
       const inTags = instanceInbounds.map(x => x.tag).filter(Boolean);
       const outTag = `out-${index}-${ip}`;
       inbounds.push(...instanceInbounds);
-      outbounds.push({ tag: outTag, protocol: "freedom", settings: { sendThrough: ip } });
+      outbounds.push({ tag: outTag, protocol: "freedom", sendThrough: ip, settings: {} });
       // 必须把该实例的全部 inbound（主入口 + 所有 fallback 子 inbound）都路由到该出口，
       // 否则 WS fallback 实际进入子 inbound 后会走默认 direct，表现为死抱 eth0。
       rules.push({ type: "field", inboundTag: inTags, outboundTag: outTag });

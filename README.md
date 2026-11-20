@@ -272,18 +272,15 @@ IPS=172.18.30.33,172.18.30.34,172.18.30.35
 
 - 你已经明确知道每张网卡/别名 IP；
 - 宿主机有多张内网 NAT IPv4，但 Cloudflare / 云厂商 NAT 会把它们分别映射为不同公网出口；
-- 不想使用 host 网络，避免和宿主机端口/服务冲突。
+- 自动枚举结果需要通过显式列表固定顺序。
 
-显式 IP 模式下可改用 bridge 网络，并按需映射端口：
+**显式填写 IPS 仍然需要 host 网络。** `sendThrough` 是 outbound 对象的顶层字段（与 `protocol`、`settings` 同级），只能绑定当前网络命名空间内的本地地址。普通 bridge 容器没有宿主网卡地址；端口映射只控制入站，不能让出站绑定宿主 IP。
 
 ```yaml
-ports:
-  - "8001:8001"
-  - "8002:8002"
-  - "8003:8003"
+network_mode: host
 ```
 
-但注意：Cloudflare Tunnel 在容器内运行时，Route 仍然应指向容器内 `localhost:8001/8002/8003`。端口映射主要用于外部访问或调试，不是 Tunnel 回源所必需。
+Cloudflare Tunnel 与 Xray 在同一网络命名空间，Routes 仍指向 `localhost:8001/8002/8003`，不需要端口映射。host 模式需提前检查监听端口冲突，不应通过 bridge + 宿主 IPS 的方式绕过。
 
 ### 端口与域名
 

@@ -11,7 +11,7 @@ services:
     env_file:
       - .env
     environment:
-      ARGO_DOMAIN: ${ARGO_DOMAIN:-${DOMAIN:-}}
+      ARGO_DOMAIN: ${ARGO_DOMAIN:-${DOMAINS:-${DOMAIN:-}}}
       ARGO_AUTH: ${AUTH}
       ARGO_PORT: ${ARGO_PORT:-8001}
       DOMAINS: ${DOMAINS:-}

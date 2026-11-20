@@ -3,7 +3,7 @@
 // 在混淆前显式读取 Railway Variables，避免依赖运行时属性访问被优化变形。
 // 支持两组变量名：标准 ARGO_DOMAIN/ARGO_AUTH 与简写 DOMAIN/AUTH，标准优先。
 const ENV = process.env || {};
-const ENV_ARGO_DOMAIN = ENV["ARGO_DOMAIN"] || ENV["DOMAIN"] || "";
+const ENV_ARGO_DOMAIN = ENV["ARGO_DOMAIN"] || ENV["DOMAINS"] || ENV["DOMAIN"] || "";
 const ENV_ARGO_AUTH = ENV["ARGO_AUTH"] || ENV["AUTH"] || "";
 const ENV_UUID = ENV["UUID"] || "aae820aa-a042-4938-9fc5-fe1d2b492c1c";
 const ENV_CFIP = ENV["CFIP"] || "cdns.doon.eu.org";

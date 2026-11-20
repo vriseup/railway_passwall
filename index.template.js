@@ -301,7 +301,8 @@ async function generateConfig() {
 
     outbounds.push({ protocol: "freedom", tag: "direct", settings: {} });
     outbounds.push({ protocol: "blackhole", tag: "block" });
-    rules.push({ type: "field", ip: ["geoip:private"], outboundTag: "direct" });
+    // 不引用 geoip:private：精简版 xray 内核可能没有 geoip.dat，
+    // 否则会导致配置加载失败。私网访问默认由 freedom 出站处理。
 
     routing = { domainStrategy: "AsIs", rules };
     console.log(`MULTI_IP_MODE enabled, ${plan.length} outbound(s): ${plan.map(x => x.ip).join(', ')}`);

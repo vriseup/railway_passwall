@@ -292,11 +292,14 @@ async function generateConfig() {
       const index = i + 1;
       const ip = item.ip;
       const currentBase = item.port;
-      const inTag = `in-${index}-${ip}`;
+      const instanceInbounds = buildInboundsForIp(ip, index, currentBase);
+      const inTags = instanceInbounds.map(x => x.tag).filter(Boolean);
       const outTag = `out-${index}-${ip}`;
-      inbounds.push(...buildInboundsForIp(ip, index, currentBase));
+      inbounds.push(...instanceInbounds);
       outbounds.push({ tag: outTag, protocol: "freedom", settings: { sendThrough: ip } });
-      rules.push({ type: "field", inboundTag: [inTag], outboundTag: outTag });
+      // 必须把该实例的全部 inbound（主入口 + 所有 fallback 子 inbound）都路由到该出口，
+      // 否则 WS fallback 实际进入子 inbound 后会走默认 direct，表现为死抱 eth0。
+      rules.push({ type: "field", inboundTag: inTags, outboundTag: outTag });
     });
 
     outbounds.push({ protocol: "freedom", tag: "direct", settings: {} });

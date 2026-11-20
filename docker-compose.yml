@@ -1,0 +1,12 @@
+services:
+  railway-passwall:
+    container_name: railway-passwall
+    restart: unless-stopped
+    image: railway-passwall:local
+    build:
+      context: https://github.com/vriseup/railway_passwall.git#main
+      dockerfile: Dockerfile
+    environment:
+      ARGO_DOMAIN: ${DOMAIN:-}
+      ARGO_AUTH: ${AUTH:-}
+      TZ: ${TZ:-Asia/Shanghai}

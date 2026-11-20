@@ -190,6 +190,225 @@ NAME-trojan
 
 你只需要复制 Deploy Logs 中的 base64 内容即可，不需要手动拼接三协议链接。
 
+多出口模式下，Deploy Logs 会按 `DOMAINS` / 自动枚举 IP 的数量，分别打印多套订阅内容，每套对应一个域名和一个出口 IP，例如：
+
+```text
+===== SUBSCRIPTION 1/3 th1-argo.example.com -> 172.18.30.33 -> localhost:8001 =====
+<第一套 base64>
+
+===== SUBSCRIPTION 2/3 th2-argo.example.com -> 172.18.30.34 -> localhost:8002 =====
+<第二套 base64>
+
+===== SUBSCRIPTION 3/3 th3-argo.example.com -> 172.18.30.35 -> localhost:8003 =====
+<第三套 base64>
+```
+
+每套 base64 解码后仍然包含 vless / vmess / trojan 三条协议链接，只是 `host`、`sni` 和节点名称使用对应域名。
+
+## 多出口 IPv4 / 多域名模式（默认启用）
+
+项目默认启用多出口模式。可通过 `.env` 中的 `DOMAINS`、`PORTS`、`IPS` 控制“域名 → 本地端口 → 出口 IP”映射；若 `IPS` 为空，则自动枚举当前网络命名空间中可见的有效 IPv4。
+
+### 推荐 .env 示例
+
+```env
+DOMAINS=th1-argo.586658.xyz,th2-argo.586658.xyz,th3-argo.586658.xyz
+IPS=
+PORTS=8001,8002,8003
+AUTH=eyJhIjoi...你的Cloudflare Tunnel Token...
+```
+
+对应关系：
+
+```text
+th1-argo.586658.xyz -> localhost:8001 -> IPS[1] 或自动枚举 IP[1]
+th2-argo.586658.xyz -> localhost:8002 -> IPS[2] 或自动枚举 IP[2]
+th3-argo.586658.xyz -> localhost:8003 -> IPS[3] 或自动枚举 IP[3]
+```
+
+Cloudflare Tunnel Routes 需要按图例手动/自动配置到这些 `localhost:800x` 端口。
+
+### IPS 为空：自动枚举模式
+
+当：
+
+```env
+IPS=
+```
+
+或未配置 `IPS` 时，程序会枚举当前容器可见网卡 IPv4。若使用 Docker host 网络，枚举到的就是宿主网卡。
+
+适合：
+
+- 云厂商直接分配多个公网 IPv4；
+- 阿里云轻量云等多网卡/多别名 IP；
+- 希望容器直接使用宿主网络，不做端口映射。
+
+此模式建议：
+
+```yaml
+network_mode: host
+```
+
+并注意 host 模式下不要依赖 `ports` 端口映射。
+
+自动枚举会优先排除 `docker0`、`br-*`、Tailscale、veth、tun/tap、wireguard、loopback 等虚拟网卡。默认也排除私有 IPv4；腾讯云轻量这种只有 `10.10.x.x` 内网 NAT + 公网出口的场景，如确实需要把它作为 `sendThrough`，需设置：
+
+```env
+MULTI_IP_INCLUDE_PRIVATE=true
+```
+
+### IPS 非空：显式 IP 模式
+
+当：
+
+```env
+IPS=172.18.30.33,172.18.30.34,172.18.30.35
+```
+
+程序只使用这里列出的 IP，不再自动枚举。
+
+适合：
+
+- 你已经明确知道每张网卡/别名 IP；
+- 宿主机有多张内网 NAT IPv4，但 Cloudflare / 云厂商 NAT 会把它们分别映射为不同公网出口；
+- 不想使用 host 网络，避免和宿主机端口/服务冲突。
+
+显式 IP 模式下可改用 bridge 网络，并按需映射端口：
+
+```yaml
+ports:
+  - "8001:8001"
+  - "8002:8002"
+  - "8003:8003"
+```
+
+但注意：Cloudflare Tunnel 在容器内运行时，Route 仍然应指向容器内 `localhost:8001/8002/8003`。端口映射主要用于外部访问或调试，不是 Tunnel 回源所必需。
+
+### 端口与域名
+
+变量按位置一一对应：
+
+```text
+DOMAINS[0] -> PORTS[0] -> IPS[0]
+DOMAINS[1] -> PORTS[1] -> IPS[1]
+DOMAINS[2] -> PORTS[2] -> IPS[2]
+```
+
+若 `PORTS` 为空，默认从 `PORT` / `ARGO_PORT` 或 `8001` 开始，每组间隔 `10`。
+
+若 `DOMAINS` 为空，旧变量 `DOMAIN` / `ARGO_DOMAIN` 仍兼容；多出口时会退化为 `net1`、`net2` 等占位域名，通常不建议。
+
+### 兼容变量
+
+仍支持旧写法：
+
+```env
+DOMAIN=
+ARGO_DOMAIN=
+ARGO_AUTH=
+```
+
+也支持新写法：
+
+```env
+DOMAINS=
+PORTS=
+IPS=
+AUTH=
+```
+
+优先级：
+
+```text
+AUTH / ARGO_AUTH
+DOMAINS / DOMAIN / ARGO_DOMAIN
+PORTS / ARGO_PORTS / ARGO_PORT
+IPS / MULTI_IP_IPS
+```
+
+## 多出口 IPv4 / 多网卡模式（旧版自动枚举说明）
+
+本项目支持在 Docker `host` 网络下，根据容器可见的宿主 IPv4 地址自动生成多组 xray 入站、出站与路由规则：
+
+- 第 1 个有效 IPv4：入站主端口 `8001`，组内端口 `8001-8005`
+- 第 2 个有效 IPv4：入站主端口 `8011`，组内端口 `8011-8015`
+- 第 3 个有效 IPv4：入站主端口 `8021`，组内端口 `8021-8025`
+- 依此类推，每组间隔 `10`
+
+每个 `freedom` outbound 会设置对应 IP 的 `sendThrough`，并通过 `routing.rules` 将该组入站绑定到该出口。
+
+### 启用方式
+
+必须让容器使用宿主网络，例如 [`docker-compose.yml`](docker-compose.yml) 中：
+
+```yaml
+network_mode: host
+```
+
+然后在环境变量中启用：
+
+```env
+MULTI_IP_MODE=true
+```
+
+如果使用 JSON 型 `ARGO_AUTH` 和固定 `ARGO_DOMAIN`，`ARGO_DOMAIN` 可以写成逗号分隔的域名列表，程序会依次生成 tunnel ingress：
+
+```env
+ARGO_DOMAIN=net1.example.com,net2.example.com,net3.example.com
+```
+
+对应 Cloudflare Tunnel Route / ingress 应按顺序指向：
+
+```text
+net1.example.com -> http://localhost:8001
+net2.example.com -> http://localhost:8011
+net3.example.com -> http://localhost:8021
+```
+
+如果使用 token 型 `ARGO_AUTH`，需要在 Cloudflare 控制台中手动创建上述 Route。
+
+### 有效 IPv4 选择规则
+
+程序默认只纳入宿主网络下常见物理网卡前缀：
+
+```text
+eth, ens, enp, eno, em, bond, br, wan, lan
+```
+
+默认排除常见虚拟网卡关键词：
+
+```text
+docker, br-, veth, virbr, vmbr, tailscale, ts, tun, tap, ppp, lo, cni, flannel, cali, weave, macvlan, ipvlan, site, utun, wg, wireguard
+```
+
+默认不纳入私有 IPv4，避免误把云厂商 NAT 内网地址、Docker 网络、局域网地址当成公网出口。如需把内网 NAT 地址也作为出口，可设置：
+
+```env
+MULTI_IP_INCLUDE_PRIVATE=true
+```
+
+如需手动覆盖枚举结果，可直接指定 IP 列表：
+
+```env
+MULTI_IP_IPS=1.2.3.4,5.6.7.8
+```
+
+也可通过更多环境变量调整筛选项：
+
+```env
+MULTI_IP_INCLUDE_LOOPBACK=false
+MULTI_IP_IFACE_PREFIXES=eth,ens,enp,eno,em,bond,br,wan,lan
+MULTI_IP_IFACE_EXCLUDE=docker,br-,veth,virbr,vmbr,tailscale,ts,tun,tap,ppp,lo,cni,flannel,cali,weave,macvlan,ipvlan,site,utun,wg,wireguard
+```
+
+### 重要限制
+
+- `host` 网络下不要依赖 `ports` 端口映射。
+- 多出口模式依赖容器内能看到宿主网卡地址；bridge 网络通常看不到宿主多 IP。
+- 云厂商直接分配公网 IPv4 时，通常可自动枚举；只分配内网 NAT 地址时，需要设置 `MULTI_IP_INCLUDE_PRIVATE=true`。
+- 该模式不能直接从 HTTP Host / SNI 自动选择出口；它通过“不同域名路由到不同本地端口”来实现按域名选择出口。
+
 ## 安全说明
 
 - 不要把 `ARGO_AUTH` 提交到 GitHub。

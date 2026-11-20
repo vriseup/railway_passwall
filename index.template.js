@@ -31,6 +31,161 @@ const CFIP = ENV_CFIP;            // 节点优选域名或优选ip
 const CFPORT = process.env.CFPORT || 443;                   // 节点优选域名或优选ip对应的端口
 const NAME = process.env.NAME || '';                        // 节点名称
 
+// 多出口 IP 模式：默认启用。
+// IPS 为空时，要求 host 网络，自动枚举宿主可见的有效 IPv4。
+// IPS 非空时，使用显式 IP 列表，可用于 bridge 网络 + 端口映射；Cloudflare Route 仍应指向容器内 localhost 端口。
+const MULTI_IP_MODE = String(ENV.MULTI_IP_MODE || 'true').toLowerCase() !== 'false';
+const MULTI_IP_INCLUDE_PRIVATE = String(ENV.MULTI_IP_INCLUDE_PRIVATE || '').toLowerCase() === 'true';
+const MULTI_IP_INCLUDE_LOOPBACK = String(ENV.MULTI_IP_INCLUDE_LOOPBACK || '').toLowerCase() === 'true';
+const MULTI_IP_IFACE_PREFIXES = String(ENV.MULTI_IP_IFACE_PREFIXES || 'eth,ens,enp,eno,em,bond,br,wan,lan')
+  .split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+const MULTI_IP_IFACE_EXCLUDE = String(ENV.MULTI_IP_IFACE_EXCLUDE || 'docker,br-,veth,virbr,vmbr,tailscale,ts,tun,tap,ppp,lo,cni,flannel,cali,weave,macvlan,ipvlan,site,utun,wg,wireguard')
+  .split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+
+function splitList(value) {
+  return String(value || '').split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
+}
+
+// 用户示例：DOMAINS=a,b,c  PORTS=8001,8002,8003  IPS=（空则自动枚举）
+const MULTI_DOMAINS = splitList(ENV.DOMAINS || ENV.ARGO_DOMAIN || ENV.DOMAIN);
+const MULTI_PORTS = splitList(ENV.PORTS || ENV.ARGO_PORTS || '').map(Number).filter(n => Number.isInteger(n) && n > 0 && n < 65536);
+const MULTI_IP_IPS = splitList(ENV.IPS || ENV.MULTI_IP_IPS);
+
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
+function isPrivateIPv4(ip) {
+  const parts = ip.split('.').map(Number);
+  const a = parts[0], b = parts[1];
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  return false;
+}
+
+function ifaceAllowed(name) {
+  const n = String(name || '').toLowerCase();
+  if (!n) return false;
+  if (MULTI_IP_INCLUDE_LOOPBACK && n === 'lo') return true;
+  if (MULTI_IP_IFACE_EXCLUDE.some(prefix => n.includes(prefix))) return false;
+  if (MULTI_IP_IFACE_PREFIXES.some(prefix => n.startsWith(prefix))) return true;
+  return false;
+}
+
+// 返回本实例要使用的 IPv4 出口列表。
+// 显式 IPS 优先；为空时枚举宿主/容器内可见 IPv4。自动枚举要求 host 网络。
+function getEffectiveIPv4s() {
+  if (MULTI_IP_IPS.length > 0) {
+    const manual = [...new Set(MULTI_IP_IPS.filter(ip => IPV4_RE.test(ip)))];
+    console.log('IPS manual:', manual.join(',') || '(none)');
+    return manual;
+  }
+
+  const found = [];
+  const interfaces = os.networkInterfaces() || {};
+  Object.keys(interfaces).forEach(name => {
+    if (!ifaceAllowed(name)) return;
+    (interfaces[name] || []).forEach(info => {
+      if (info.family !== 'IPv4') return;
+      if (!IPV4_RE.test(info.address)) return;
+      if (info.internal && !MULTI_IP_INCLUDE_LOOPBACK) return;
+      if (isPrivateIPv4(info.address) && !MULTI_IP_INCLUDE_PRIVATE) return;
+      found.push(info.address);
+    });
+  });
+
+  const unique = [...new Set(found)];
+  console.log('MULTI_IP discovered:', unique.join(',') || '(none)');
+  return unique;
+}
+
+function getBasePorts(count) {
+  if (MULTI_PORTS.length >= count) return MULTI_PORTS.slice(0, count);
+  const first = MULTI_PORTS[0] || (Number(ARGO_PORT) || 8001);
+  return Array.from({ length: count }, (_, i) => first + i * 10);
+}
+
+function getDomains(count) {
+  if (MULTI_DOMAINS.length > 0) {
+    return Array.from({ length: count }, (_, i) => MULTI_DOMAINS[i] || MULTI_DOMAINS[0]);
+  }
+  return Array.from({ length: count }, (_, i) => `net${i + 1}`);
+}
+
+function getRoutePlan() {
+  const ips = getEffectiveIPv4s();
+  const ports = getBasePorts(ips.length);
+  const domains = getDomains(ips.length);
+  return ips.map((ip, i) => ({ ip, port: ports[i], domain: domains[i] }));
+}
+
+function buildFallbacks(basePort) {
+  return [
+    { dest: basePort + 1 },
+    { path: "/vless-argo", dest: basePort + 2 },
+    { path: "/vmess-argo", dest: basePort + 3 },
+    { path: "/trojan-argo", dest: basePort + 4 }
+  ];
+}
+
+function buildInboundsForIp(ip, index, basePort) {
+  const tag = `in-${index}-${ip}`;
+  // 主端口仅做 TCP 分流入口，不占用额外监听端口；
+  // 三个 WS fallback 也复用同一端口，路径区分。
+  const vlessPort = basePort;
+  const wsVlessPort = basePort;
+  const wsVmessPort = basePort;
+  const wsTrojanPort = basePort;
+
+  return [
+    {
+      tag,
+      port: basePort,
+      listen: "0.0.0.0",
+      protocol: 'vless',
+      settings: { clients: [{ id: UUID, flow: 'xtls-rprx-vision' }], decryption: 'none', fallbacks: buildFallbacks(basePort) },
+      streamSettings: { network: 'tcp' }
+    },
+    {
+      tag: `vless-${index}-${ip}`,
+      listen: "127.0.0.1",
+      port: vlessPort,
+      protocol: "vless",
+      settings: { clients: [{ id: UUID }], decryption: "none" },
+      streamSettings: { network: "tcp", security: "none" }
+    },
+    {
+      tag: `vless-ws-${index}-${ip}`,
+      listen: "127.0.0.1",
+      port: wsVlessPort,
+      protocol: "vless",
+      settings: { clients: [{ id: UUID, level: 0 }], decryption: "none" },
+      streamSettings: { network: "ws", security: "none", wsSettings: { path: "/vless-argo" } },
+      sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false }
+    },
+    {
+      tag: `vmess-ws-${index}-${ip}`,
+      listen: "127.0.0.1",
+      port: wsVmessPort,
+      protocol: "vmess",
+      settings: { clients: [{ id: UUID, alterId: 0 }] },
+      streamSettings: { network: "ws", wsSettings: { path: "/vmess-argo" } },
+      sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false }
+    },
+    {
+      tag: `trojan-ws-${index}-${ip}`,
+      listen: "127.0.0.1",
+      port: wsTrojanPort,
+      protocol: "trojan",
+      settings: { clients: [{ password: UUID }] },
+      streamSettings: { network: "ws", security: "none", wsSettings: { path: "/trojan-argo" } },
+      sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false }
+    }
+  ];
+}
+
 // 创建运行文件夹
 if (!fs.existsSync(FILE_PATH)) {
   fs.mkdirSync(FILE_PATH);
@@ -117,18 +272,59 @@ function cleanupOldFiles() {
 
 // 生成xr-ay配置文件
 async function generateConfig() {
-  const config = {
-    log: { access: '/dev/null', error: '/dev/null', loglevel: 'none' },
-    inbounds: [
+  let inbounds;
+  let outbounds;
+  let routing;
+
+  if (MULTI_IP_MODE) {
+    const ips = getEffectiveIPv4s();
+    if (ips.length === 0) {
+      throw new Error('MULTI_IP_MODE=true 但未发现有效 IPv4 出口地址，请检查 host 网络或设置 MULTI_IP_IPS');
+    }
+
+    const plan = getRoutePlan();
+    inbounds = [];
+    outbounds = [];
+    const rules = [];
+
+    plan.forEach((item, i) => {
+      const index = i + 1;
+      const ip = item.ip;
+      const currentBase = item.port;
+      const inTag = `in-${index}-${ip}`;
+      const outTag = `out-${index}-${ip}`;
+      inbounds.push(...buildInboundsForIp(ip, index, currentBase));
+      outbounds.push({ tag: outTag, protocol: "freedom", settings: { sendThrough: ip } });
+      rules.push({ type: "field", inboundTag: [inTag], outboundTag: outTag });
+    });
+
+    outbounds.push({ protocol: "freedom", tag: "direct", settings: {} });
+    outbounds.push({ protocol: "blackhole", tag: "block" });
+    rules.push({ type: "field", ip: ["geoip:private"], outboundTag: "direct" });
+
+    routing = { domainStrategy: "AsIs", rules };
+    console.log(`MULTI_IP_MODE enabled, ${plan.length} outbound(s): ${plan.map(x => x.ip).join(', ')}`);
+    console.log(`MULTI_IP routes: ${plan.map(x => `${x.domain}->localhost:${x.port}->${x.ip}`).join(', ')}`);
+  } else {
+    inbounds = [
       { port: ARGO_PORT, protocol: 'vless', settings: { clients: [{ id: UUID, flow: 'xtls-rprx-vision' }], decryption: 'none', fallbacks: [{ dest: 3001 }, { path: "/vless-argo", dest: 3002 }, { path: "/vmess-argo", dest: 3003 }, { path: "/trojan-argo", dest: 3004 }] }, streamSettings: { network: 'tcp' } },
       { port: 3001, listen: "127.0.0.1", protocol: "vless", settings: { clients: [{ id: UUID }], decryption: "none" }, streamSettings: { network: "tcp", security: "none" } },
       { port: 3002, listen: "127.0.0.1", protocol: "vless", settings: { clients: [{ id: UUID, level: 0 }], decryption: "none" }, streamSettings: { network: "ws", security: "none", wsSettings: { path: "/vless-argo" } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
       { port: 3003, listen: "127.0.0.1", protocol: "vmess", settings: { clients: [{ id: UUID, alterId: 0 }] }, streamSettings: { network: "ws", wsSettings: { path: "/vmess-argo" } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
-      { port: 3004, listen: "127.0.0.1", protocol: "trojan", settings: { clients: [{ password: UUID }] }, streamSettings: { network: "ws", security: "none", wsSettings: { path: "/trojan-argo" } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } },
-    ],
+      { port: 3004, listen: "127.0.0.1", protocol: "trojan", settings: { clients: [{ password: UUID }] }, streamSettings: { network: "ws", security: "none", wsSettings: { path: "/trojan-argo" } }, sniffing: { enabled: true, destOverride: ["http", "tls", "quic"], metadataOnly: false } }
+    ];
+    outbounds = [{ protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "block" }];
+  }
+
+  const config = {
+    log: { access: '/dev/null', error: '/dev/null', loglevel: 'none' },
+    inbounds,
     dns: { servers: ["https+local://8.8.8.8/dns-query"] },
-    outbounds: [{ protocol: "freedom", tag: "direct" }, { protocol: "blackhole", tag: "block" }]
+    outbounds
   };
+
+  if (routing) config.routing = routing;
+
   fs.writeFileSync(path.join(FILE_PATH, 'config.json'), JSON.stringify(config, null, 2));
 }
 
@@ -362,21 +558,38 @@ function argoType() {
 
   if (ARGO_AUTH.includes('TunnelSecret')) {
     fs.writeFileSync(path.join(FILE_PATH, 'tunnel.json'), ARGO_AUTH);
+
+    let ingress;
+    if (MULTI_IP_MODE) {
+      const plan = getRoutePlan();
+      if (plan.length === 0) {
+        throw new Error('MULTI_IP_MODE 开启但未发现有效 IPv4 出口地址，无法生成 tunnel ingress');
+      }
+      ingress = plan.map(item => {
+        return `    - hostname: ${item.domain}\n      service: http://localhost:${item.port}\n      originRequest:\n        noTLSVerify: true`;
+      }).join('\n');
+      console.log('MULTI_IP tunnel ingress:', plan.map(x => `${x.domain}->localhost:${x.port}->${x.ip}`).join(', '));
+    } else {
+      ingress = `    - hostname: ${ARGO_DOMAIN}\n      service: http://localhost:${ARGO_PORT}\n      originRequest:\n        noTLSVerify: true`;
+    }
+
     const tunnelYaml = `
   tunnel: ${ARGO_AUTH.split('"')[11]}
   credentials-file: ${path.join(FILE_PATH, 'tunnel.json')}
   protocol: http2
   
   ingress:
-    - hostname: ${ARGO_DOMAIN}
-      service: http://localhost:${ARGO_PORT}
-      originRequest:
-        noTLSVerify: true
+${ingress}
     - service: http_status:404
   `;
     fs.writeFileSync(path.join(FILE_PATH, 'tunnel.yml'), tunnelYaml);
   } else {
-    console.log(`Using token connect to tunnel, please set ${ARGO_PORT} in clouudflare`);
+    if (MULTI_IP_MODE) {
+      const plan = getRoutePlan();
+      console.log(`Using token connect to tunnel. MULTI_IP_MODE requires Cloudflare Routes: ${plan.map(x => `${x.domain}->localhost:${x.port}->${x.ip}`).join(', ')}`);
+    } else {
+      console.log(`Using token connect to tunnel, please set ${ARGO_PORT} in clouudflare`);
+    }
   }
 }
 
@@ -385,9 +598,15 @@ async function extractDomains() {
   let argoDomain;
 
   if (ARGO_AUTH && ARGO_DOMAIN) {
-    argoDomain = ARGO_DOMAIN;
-    console.log('ARGO_DOMAIN:', argoDomain);
-    await generateLinks(argoDomain);
+    if (MULTI_IP_MODE) {
+      const plan = getRoutePlan();
+      console.log('ARGO_DOMAIN list:', plan.map(x => x.domain).join(', '));
+      await generateLinksForPlan(plan);
+    } else {
+      argoDomain = ARGO_DOMAIN;
+      console.log('ARGO_DOMAIN:', argoDomain);
+      await generateLinks(argoDomain);
+    }
   } else {
     try {
       const fileContent = fs.readFileSync(path.join(FILE_PATH, 'boot.log'), 'utf-8');
@@ -455,6 +674,15 @@ async function getMetaInfo() {
     }
   }
   return 'Unknown';
+}
+
+// 多出口模式下，按域名数量生成多套订阅 base64
+async function generateLinksForPlan(plan) {
+  for (let i = 0; i < plan.length; i++) {
+    const item = plan[i];
+    console.log(`\n===== SUBSCRIPTION ${i + 1}/${plan.length} ${item.domain} -> ${item.ip} -> localhost:${item.port} =====`);
+    await generateLinks(item.domain);
+  }
 }
 
 // 生成 list 和 sub 信息

@@ -11,6 +11,12 @@ services:
     env_file:
       - .env
     environment:
-      ARGO_DOMAIN: ${DOMAIN}
+      ARGO_DOMAIN: ${ARGO_DOMAIN:-${DOMAIN:-}}
       ARGO_AUTH: ${AUTH}
+      ARGO_PORT: ${ARGO_PORT:-8001}
+      DOMAINS: ${DOMAINS:-}
+      IPS: ${IPS:-}
+      PORTS: ${PORTS:-}
+      MULTI_IP_MODE: ${MULTI_IP_MODE:-true}
+      MULTI_IP_INCLUDE_PRIVATE: ${MULTI_IP_INCLUDE_PRIVATE:-false}
       TZ: Asia/Shanghai

@@ -9,6 +9,21 @@
 - 运行时所有配置都从 `process.env` 读取；
 - 一套 GitHub 仓库可以在 Railway 上创建多个 Service，每个 Service 使用不同 Variables，实现多个域名和 Tunnel 并行部署。
 
+## 单出口与 Railway 兼容性
+
+- 不配置 `IPS` / `PORTS`，或设置为空值：单出口环境使用系统默认出口，入口默认 `8001`。不要求容器拥有宿主机网络权限。
+- 只配置 `PORTS=8101`：入口改为 `8101`，Cloudflare Route 也需同步指向该端口。
+- 配置一个 `IPS`：该地址必须是容器当前网络命名空间内的真实本地 IPv4；绑定宿主机地址仍需 Linux host 网络。不要填写容器不可见的宿主 NAT 地址或公网映射地址。
+- 未显式指定 IP 时，只有发现多个符合筛选规则的 IPv4 才自动分别绑定；找不到候选地址或只有一个候选地址时使用默认路由，不因 PaaS 私网地址被过滤而启动失败。
+- Railway 继续使用根目录 Dockerfile 构建，不执行 Docker Compose，也不要求 host 网络。仅配置 `DOMAIN` / `AUTH` 或 `ARGO_DOMAIN` / `ARGO_AUTH` 即可；多出口模式无需关闭。
+- 仓库 Compose 的 `network_mode: host` 面向需要绑定宿主多 IP 的 Linux 主机；普通单出口 bridge 容器可以移除此行。它不影响 Railway 的 Dockerfile 构建。
+
+配置回归测试（不启动 Tunnel、不访问网络、不读取真实密钥）：
+
+```bash
+node scripts/test-config.js
+```
+
 ## 部署到 Railway
 
 ### 1. 连接 GitHub 仓库

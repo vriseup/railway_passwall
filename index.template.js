@@ -26,7 +26,7 @@ const NEZHA_PORT = ENV.NEZHA_PORT || '';            // 使用哪吒v1请留空�
 const NEZHA_KEY = ENV.NEZHA_KEY || '';              // 哪吒v1的NZ_CLIENT_SECRET或哪吒v0的agent密钥
 const ARGO_DOMAIN = ENV_ARGO_DOMAIN;          // 固定隧道域名,留空即启用临时隧道
 const ARGO_AUTH = ENV_ARGO_AUTH;              // 固定隧道密钥json或token,留空即启用临时隧道,json获取地址：https://json.zone.id
-const ARGO_PORT = ENV.ARGO_PORT || 8001;            // 固定隧道端口,使用token需在cloudflare后台设置和这里一致
+const ARGO_PORT = Number(ENV.ARGO_PORT || String(ENV.PORTS || '').split(',')[0].trim() || 8001);            // 固定隧道端口,使用token需在cloudflare后台设置和这里一致
 const CFIP = ENV_CFIP;            // 节点优选域名或优选ip
 const CFPORT = process.env.CFPORT || 443;                   // 节点优选域名或优选ip对应的端口
 const NAME = process.env.NAME || '';                        // 节点名称
@@ -78,7 +78,8 @@ function ifaceAllowed(name) {
 // 显式 IPS 优先；为空时枚举宿主/容器内可见 IPv4。自动枚举要求 host 网络。
 function getEffectiveIPv4s() {
   if (MULTI_IP_IPS.length > 0) {
-    const manual = [...new Set(MULTI_IP_IPS.filter(ip => IPV4_RE.test(ip)))];
+    if (MULTI_IP_IPS.some(ip => !IPV4_RE.test(ip))) throw new Error('IPS 包含无效 IPv4 地址');
+    const manual = [...new Set(MULTI_IP_IPS)];
     console.log('IPS manual:', manual.join(',') || '(none)');
     return manual;
   }
@@ -115,7 +116,10 @@ function getDomains(count) {
 }
 
 function getRoutePlan() {
-  const ips = getEffectiveIPv4s();
+  const discovered = getEffectiveIPv4s();
+  // 未显式绑定且只有一个或没有候选地址：保留系统默认出口，兼容 PaaS 私网容器。
+  const ips = MULTI_IP_IPS.length || discovered.length > 1
+    ? discovered : [null];
   const ports = getBasePorts(ips.length);
   const domains = getDomains(ips.length);
   return ips.map((ip, i) => ({ ip, port: ports[i], domain: domains[i] }));
@@ -278,16 +282,11 @@ async function generateConfig() {
   let routing;
 
   if (MULTI_IP_MODE) {
-    const ips = getEffectiveIPv4s();
-    if (ips.length === 0) {
-      throw new Error('MULTI_IP_MODE=true 但未发现有效 IPv4 出口地址，请检查 host 网络或设置 MULTI_IP_IPS');
-    }
-
     const plan = getRoutePlan();
     const localIPv4s = new Set(Object.values(os.networkInterfaces()).flat()
       .filter(info => info.family === 'IPv4').map(info => info.address));
     for (const item of plan) {
-      if (!localIPv4s.has(item.ip)) {
+      if (item.ip && !localIPv4s.has(item.ip)) {
         throw new Error(`出口地址 ${item.ip} 不在当前网络命名空间中。绑定宿主 IP 必须使用 network_mode: host；填写 IPS 或添加 ports 映射不能代替 host 网络。`);
       }
     }
@@ -303,7 +302,7 @@ async function generateConfig() {
       const inTags = instanceInbounds.map(x => x.tag).filter(Boolean);
       const outTag = `out-${index}-${ip}`;
       inbounds.push(...instanceInbounds);
-      outbounds.push({ tag: outTag, protocol: "freedom", sendThrough: ip, settings: {} });
+      outbounds.push({ tag: outTag, protocol: "freedom", ...(ip ? { sendThrough: ip } : {}), settings: {} });
       // 必须把该实例的全部 inbound（主入口 + 所有 fallback 子 inbound）都路由到该出口，
       // 否则 WS fallback 实际进入子 inbound 后会走默认 direct，表现为死抱 eth0。
       rules.push({ type: "field", inboundTag: inTags, outboundTag: outTag });
@@ -812,9 +811,9 @@ async function AddVisitTask() {
 // 主运行逻辑
 async function startserver() {
   try {
-    argoType();
     deleteNodes();
     cleanupOldFiles();
+    argoType();
     await generateConfig();
     await downloadFilesAndRun();
     await extractDomains();

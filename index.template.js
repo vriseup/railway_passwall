@@ -122,22 +122,23 @@ function getRoutePlan() {
 }
 
 function buildFallbacks(basePort) {
+  // 主入口与内部协议 inbound 不能使用同一端口，否则 Xray 重复监听会导致部分 inbound 启动失败。
+  // 每个出口实例使用独立内部端口段：base+1000、base+2000、base+3000、base+4000。
   return [
-    { dest: basePort + 1 },
-    { path: "/vless-argo", dest: basePort + 2 },
-    { path: "/vmess-argo", dest: basePort + 3 },
-    { path: "/trojan-argo", dest: basePort + 4 }
+    { dest: basePort + 1000 },
+    { path: "/vless-argo", dest: basePort + 2000 },
+    { path: "/vmess-argo", dest: basePort + 3000 },
+    { path: "/trojan-argo", dest: basePort + 4000 }
   ];
 }
 
 function buildInboundsForIp(ip, index, basePort) {
   const tag = `in-${index}-${ip}`;
-  // 主端口仅做 TCP 分流入口，不占用额外监听端口；
-  // 三个 WS fallback 也复用同一端口，路径区分。
-  const vlessPort = basePort;
-  const wsVlessPort = basePort;
-  const wsVmessPort = basePort;
-  const wsTrojanPort = basePort;
+  // 主端口只负责 TCP fallback 分流；内部协议 inbound 使用独立端口，避免同端口重复监听。
+  const vlessPort = basePort + 1000;
+  const wsVlessPort = basePort + 2000;
+  const wsVmessPort = basePort + 3000;
+  const wsTrojanPort = basePort + 4000;
 
   return [
     {

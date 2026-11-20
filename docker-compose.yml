@@ -11,4 +11,4 @@ services:
     environment:
       ARGO_DOMAIN: ${DOMAIN}
       ARGO_AUTH: ${AUTH}
-      TZ: ${TZ}
+      TZ: Asia/Shanghai

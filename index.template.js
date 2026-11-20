@@ -480,11 +480,15 @@ uuid: ${UUID}`;
   }
 
   // 运行xr-ay
-  const command1 = `nohup ${webPath} -c ${FILE_PATH}/config.json >/dev/null 2>&1 &`;
+  const command1 = `nohup ${webPath} -c ${FILE_PATH}/config.json >${FILE_PATH}/xray.log 2>&1 &`;
   try {
     await exec(command1);
     console.log(`${webName} is running`);
     await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const xrayLog = fs.existsSync(path.join(FILE_PATH, 'xray.log')) ? fs.readFileSync(path.join(FILE_PATH, 'xray.log'), 'utf-8') : '';
+      if (xrayLog.trim()) console.log(`xray log:\n${xrayLog.slice(-4000)}`);
+    } catch (e) {}
   } catch (error) {
     console.error(`web running error: ${error}`);
   }
